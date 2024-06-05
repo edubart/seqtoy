@@ -1,0 +1,147 @@
+-------------------------------------------------------------------------------
+-- Instruments
+
+global SynthWave = @[2]riv_waveform_desc
+
+global STRINGS_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_TRIANGLE,
+  attack = 0.1, decay = 0.1, sustain = 0.8, release = 0.1,
+  start_frequency = 1, end_frequency = 1,
+  amplitude = 0.07, sustain_level = 0.8,
+  duty_cycle = 0.25, pan=0.125,
+},{
+  type = RIV_WAVEFORM_ORGAN,
+  attack = 0.1, decay = 0.1, sustain = 0.8, release = 0.1,
+  start_frequency = 1, end_frequency = 1,
+  amplitude = 0.07, sustain_level = 0.8,
+  duty_cycle = 0.5, pan=-0.125,
+}}
+
+global LEAD_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_PULSE,
+  attack = 0.1, decay = 0.1, sustain = 0.6, release = 0.1,
+  start_frequency = 2, end_frequency = 2,
+  amplitude = 0.07, sustain_level = 0.75,
+  duty_cycle = 0.125, pan=0.125,
+},{
+  type = RIV_WAVEFORM_TRIANGLE,
+  attack = 0.1, decay = 0.1, sustain = 0.6, release = 0.2,
+  start_frequency = 4, end_frequency = 4,
+  amplitude = 0.07, sustain_level = 0.75,
+  duty_cycle = 0.5, pan=-0.125,
+}}
+
+global BASS_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_PULSE,
+  attack = 0.2, decay = 0.0, sustain = 0.7, release = 0.1,
+  start_frequency = 0.25, end_frequency = 0.25,
+  amplitude = 0.12, sustain_level = 1,
+  duty_cycle = 0.25, pan=0.125,
+},{
+  type = RIV_WAVEFORM_TILTED_SAWTOOTH,
+  attack = 0.2, decay = 0.0, sustain = 0.7, release = 0.1,
+  start_frequency = 0.5, end_frequency = 0.5,
+  amplitude = 0.08, sustain_level = 1,
+  duty_cycle = 0.5, pan=-0.125,
+}}
+
+-------------------------------------------------------------------------------
+-- Drums
+
+global HIGHKICK_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_SINE,
+  attack = 0.05, decay = 0.05, sustain = 0.8, release = 0.1,
+  start_frequency = RIV_NOTE_Eb3, end_frequency = RIV_NOTE_C0,
+  amplitude = 0.4, sustain_level = 0.5,
+  duty_cycle = 0.5, pan=0.125,
+},{
+  type = RIV_WAVEFORM_PULSE,
+  attack = 0.05, decay = 0.05, sustain = 0.8, release = 0.1,
+  start_frequency = RIV_NOTE_Eb3, end_frequency = RIV_NOTE_C0,
+  amplitude = 0.3, sustain_level = 0.5,
+  duty_cycle = 0.2, pan=-0.125,
+}}
+
+global KICK_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_SINE,
+  attack = 0.05, decay = 0.05, sustain = 0.7, release = 0.1,
+  start_frequency = RIV_NOTE_Eb3, end_frequency = RIV_NOTE_C1,
+  amplitude = 0.5, sustain_level = 0.5,
+  duty_cycle = 0.5, pan=0.125,
+},{
+  type = RIV_WAVEFORM_PULSE,
+  attack = 0.05, decay = 0.05, sustain = 0.7, release = 0.1,
+  start_frequency = RIV_NOTE_Eb2, end_frequency = RIV_NOTE_C1,
+  amplitude = 0.4, sustain_level = 0.5,
+  duty_cycle = 0.2, pan=-0.125,
+}}
+
+global LOWKICK_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_SINE,
+  attack = 0.05, decay = 0.05, sustain = 0.7, release = 0.1,
+  start_frequency = RIV_NOTE_Eb2, end_frequency = RIV_NOTE_C0,
+  amplitude = 0.6, sustain_level = 0.5,
+  duty_cycle = 0.5, pan=0.125,
+},{
+  type = RIV_WAVEFORM_PULSE,
+  attack = 0.05, decay = 0.05, sustain = 0.7, release = 0.1,
+  start_frequency = RIV_NOTE_Eb2, end_frequency = RIV_NOTE_C0,
+  amplitude = 0.5, sustain_level = 0.5,
+  duty_cycle = 0.2, pan=-0.125,
+}}
+
+global HIGHTOM_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_SINE,
+  attack = 0.05, decay = 0.2, sustain = 0.7, release = 0.2,
+  start_frequency = RIV_NOTE_C4, end_frequency = RIV_NOTE_C0,
+  amplitude = 0.5, sustain_level = 0.4,
+  duty_cycle = 0.2, pan=-0.125,
+}}
+
+global TOM_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_SINE,
+  attack = 0.05, decay = 0.2, sustain = 0.7, release = 0.2,
+  start_frequency = RIV_NOTE_Eb3, end_frequency = RIV_NOTE_C0,
+  amplitude = 0.6, sustain_level = 0.4,
+  duty_cycle = 0.4, pan=0.0,
+}}
+
+global HIT_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_NOISE,
+  attack = 0.02, decay = 0.1, sustain = 0.05, release = 0.05,
+  start_frequency = RIV_NOTE_C7, end_frequency = RIV_NOTE_C7,
+  amplitude = 0.08, sustain_level = 0.1,
+  duty_cycle = 0.5, pan=0.0,
+}}
+
+global CLAP_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_NOISE,
+  attack = 0.05, decay = 0.05, sustain = 0.3, release = 0.3,
+  start_frequency = RIV_NOTE_C6, end_frequency = RIV_NOTE_C6,
+  amplitude = 0.11, sustain_level = 0.3,
+  duty_cycle = 0.5, pan=0.0,
+}}
+
+global CRASH_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_NOISE,
+  attack = 0.05, decay = 0.05, sustain = 0.0, release = 0.9,
+  start_frequency = RIV_NOTE_Eb6, end_frequency = 2*RIV_NOTE_Eb8,
+  amplitude = 0.12, sustain_level = 0.4,
+  duty_cycle = 0.5, pan=0.0,
+}}
+
+global CLICK_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_TRIANGLE,
+  attack = 0.05, decay = 0.2, sustain = 0.1, release = 0.3,
+  start_frequency = RIV_NOTE_Eb6, end_frequency = RIV_NOTE_Eb6,
+  amplitude = 0.1, sustain_level = 0.2,
+  duty_cycle = 0.5, pan=0.0,
+}}
+
+global HIGHCLICK_WAVE: SynthWave = {{
+  type = RIV_WAVEFORM_TRIANGLE,
+  attack = 0.05, decay = 0.2, sustain = 0.2, release = 0.3,
+  start_frequency = RIV_NOTE_Eb7, end_frequency = RIV_NOTE_Eb7,
+  amplitude = 0.06, sustain_level = 0.3,
+  duty_cycle = 0.5, pan=0.0,
+}}

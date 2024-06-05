@@ -1,0 +1,744 @@
+## pragma{nogc=true, noerrorloc=true}
+
+require 'riv'
+require 'math'
+require 'instruments'
+require 'iterators'
+
+--------------------------------------------------------------------------------
+-- Global constants
+
+local TIME_SIG <comptime> = 4
+local NOTES_TRACKS <comptime> = 4
+local NOTES_PAGES <comptime> = 7
+local NOTES_COLUMNS <comptime> = 16
+local NOTES_TOTAL_COLUMNS <comptime> = NOTES_PAGES*NOTES_COLUMNS
+local NOTES_ROWS <comptime> = 10
+local NOTES_NAMES: [12]string = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"}
+
+local EditState = @enum{
+  NOTE_FOCUS = 0,
+  NOTE_TOGGLE,
+  NOTE_SLIDE,
+  NOTE_SHIFT,
+  NOTE_VOLUME,
+  PAGE_FOCUS,
+  TRACK_FOCUS,
+}
+
+--------------------------------------------------------------------------------
+-- Synth note
+
+global SynthNote = @record{
+  waves: SynthWave,
+  start_freq: float32,
+  end_freq: float32,
+  amplitude: float32,
+  periods: float32,
+  bps: float32,
+}
+
+function SynthNote:play()
+  for _,wave in mipairs(self.waves) do
+    if wave.type <= 0 or self.periods <= 0 then continue end
+    -- start freq
+    if wave.start_frequency <= 8 and self.start_freq > 0then
+      wave.start_frequency = wave.start_frequency * self.start_freq
+    elseif self.start_freq > 0 and self.end_freq > 0 then
+      wave.start_frequency = wave.start_frequency * (self.start_freq/self.end_freq)
+    end
+    -- end freq
+    if wave.end_frequency <= 8 and self.end_freq > 0 then
+      wave.end_frequency = wave.end_frequency * self.end_freq
+    end
+    wave.attack = self.periods * wave.attack / self.bps
+    wave.decay = self.periods * wave.decay / self.bps
+    wave.sustain = self.periods * wave.sustain / self.bps
+    wave.release = self.periods * wave.release / self.bps
+    wave.amplitude = self.amplitude * wave.amplitude
+    riv_waveform(wave)
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Synths
+
+local synths: [NOTES_TRACKS][NOTES_ROWS]SynthWave = {
+  {STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE,STRINGS_WAVE},
+  {LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE,LEAD_WAVE},
+  {BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE,BASS_WAVE},
+  {HIGHKICK_WAVE,KICK_WAVE,LOWKICK_WAVE,HIGHTOM_WAVE,TOM_WAVE,HIT_WAVE,CLAP_WAVE,CRASH_WAVE,HIGHCLICK_WAVE,CLICK_WAVE},
+}
+
+local synth_names: [NOTES_TRACKS]string = {
+  "Strings",
+  "Lead",
+  "Bass",
+  "Drums"
+}
+
+--------------------------------------------------------------------------------
+-- Utilities
+
+local function riv_is_key_repeat_press(key: uint8, first_delay: uint64, repeat_delay: uint64): boolean
+  if riv.keys[key].press then return true end
+  if not riv.keys[key].down then return false end
+  if first_delay == 0 then first_delay = math.max(riv.target_fps // 3, 1) end
+  if repeat_delay == 0 then repeat_delay = math.max(riv.target_fps // 15, 1) end
+  local down_frame: uint64 = riv.keys[key].down_frame
+  return riv.frame >= down_frame + first_delay and (riv.frame - down_frame) % repeat_delay == 0
+end
+
+local function get_major_pentatonic_scale(semitone_index: int64): [3*NOTES_ROWS]float32
+  local freq = 110.0 * 2.0 ^ ((semitone_index - 45)/12.0)
+  local scale: [3*NOTES_ROWS]float32
+  for i=0,<4 do
+    scale[i*5+0] = math.ifloor(freq * 2.0 ^ ((3-i) + 9.0/12.0))
+    scale[i*5+1] = math.ifloor(freq * 2.0 ^ ((3-i) + 7.0/12.0))
+    scale[i*5+2] = math.ifloor(freq * 2.0 ^ ((3-i) + 4.0/12.0))
+    scale[i*5+3] = math.ifloor(freq * 2.0 ^ ((3-i) + 2.0/12.0))
+    scale[i*5+4] = math.ifloor(freq * 2.0 ^ ((3-i) + 0.0/12.0))
+  end
+  return scale
+end
+
+local function sinc_impulse(x: float64, k: float64): float64
+  local a = math.pi*(k*x-1)
+  return a ~= 0 and math.sin(a)/a or 1
+end
+
+local function align_page(x: int64): int64
+  return (x // NOTES_COLUMNS) * NOTES_COLUMNS
+end
+
+local function align_page_forward(x: int64): int64
+  return (x // NOTES_COLUMNS) * NOTES_COLUMNS + NOTES_COLUMNS
+end
+
+--------------------------------------------------------------------------------
+-- State
+
+local Note = @record{
+  periods: int8,
+  volume: int8,
+  slide: int8,
+}
+
+local Music = @record{
+  magic: [4]uint8,
+  version: uint8,
+  flags: uint8,
+  bpm: int16,
+  track_sizes: [NOTES_TRACKS]uint32,
+  pages: [NOTES_TRACKS][NOTES_ROWS][NOTES_TOTAL_COLUMNS]Note,
+}
+
+local mus = (@*Music)(&riv.outcard[0])
+riv.outcard_len = #@Music
+mus.magic = {'S'_b,'E'_b,'Q'_b,'T'_b}
+mus.bpm = 90
+
+if riv.incard_len > 0 then
+  local incard_mus = (@*Music)(&riv.incard[0])
+  assert(riv.incard_len == #@Music and
+          incard_mus.magic == mus.magic and
+          incard_mus.version == 0 and incard_mus.flags == 0 and
+          incard_mus.bpm >= 1 and incard_mus.bpm <= 900,
+    'invalid sequencer music file for incard')
+  $mus = $incard_mus
+end
+
+--------------------------------------------------------------------------------
+-- Sequencer logic
+
+local focus_x = 0
+local focus_y = 0
+local focus_z = 0
+local track_solo_z = -1
+local note_time = 0.0
+local last_toggle_x = -1
+local last_toggle_y = -1
+local last_toggle_action = 0
+local last_note_frame = -1
+local note_frame_start = 0
+local note_frame_end = 0
+local note_scale_index = 39 -- Eb3
+local note_scale_index_min = note_scale_index-24 -- Eb1
+local note_scale_index_max = note_scale_index+24 -- Eb5
+local pentatic_scale_offsets = (@[5]int64){0,2,4,7,9}
+local note_scale = get_major_pentatonic_scale(note_scale_index)
+local page_clipboard: [NOTES_ROWS][NOTES_COLUMNS]Note
+local played_frames: [NOTES_TRACKS][NOTES_ROWS][NOTES_TOTAL_COLUMNS]uint64
+local muted_tracks: [NOTES_ROWS]boolean
+
+local function focus_note(dx: int64, dy: int64, dz: int64)
+  focus_z = (focus_z + dz) % NOTES_TRACKS
+  focus_y = (focus_y + dy) % NOTES_ROWS
+  if math.abs(dx) < NOTES_COLUMNS then -- cycle page
+    focus_x = (focus_x - align_page(focus_x) + dx) % NOTES_COLUMNS + align_page(focus_x)
+  else -- change page
+    focus_x = (focus_x + dx) % math.max(mus.track_sizes[focus_z], NOTES_COLUMNS)
+  end
+  focus_x = math.clamp(focus_x, 0, math.max(mus.track_sizes[focus_z], NOTES_COLUMNS)-1)
+end
+
+local function get_prev_multi_period_x(x: int64, y: int64, z: int64): int64
+  for note_x=x-1,>=0,-1 do
+    local periods = mus.pages[z][y][note_x].periods
+    if periods >= 1 then
+      return (note_x + periods > x) and note_x or -1
+    end
+  end
+  return -1
+end
+
+local function decrement_overlap_note(x: int64, y: int64, z: int64)
+  local prev_multi_period_x = get_prev_multi_period_x(x, y, z)
+  if prev_multi_period_x >= 0 then
+    mus.pages[z][y][prev_multi_period_x].periods = x - prev_multi_period_x
+  end
+end
+
+local function toggle_note(toggle_action: int64)
+  decrement_overlap_note(focus_x, focus_y, focus_z)
+  if toggle_action == -1 then
+    toggle_action = (mus.pages[focus_z][focus_y][focus_x].periods == 0) and 1 or 0
+  end
+  mus.pages[focus_z][focus_y][focus_x] = {periods=toggle_action}
+  last_toggle_action = toggle_action
+  last_toggle_x = focus_x
+  last_toggle_y = focus_y
+end
+
+local function place_note(overwrite: boolean)
+  if mus.pages[focus_z][focus_y][focus_x].periods > 0 then return end
+  toggle_note(1)
+end
+
+local function remove_page(z: int64, x: int64): boolean
+  if mus.track_sizes[z] <= NOTES_COLUMNS or x >= mus.track_sizes[z] then return false end
+  mus.track_sizes[z] = mus.track_sizes[z] - NOTES_COLUMNS
+  for y=0,<NOTES_ROWS do -- shift notes
+    for ix=align_page(x),<NOTES_TOTAL_COLUMNS-NOTES_COLUMNS do
+      mus.pages[z][y][ix] = mus.pages[z][y][ix+NOTES_COLUMNS]
+      mus.pages[z][y][ix+NOTES_COLUMNS] = {}
+    end
+  end
+  return true
+end
+
+local function append_page(z: int64, x: int64): boolean
+  if mus.track_sizes[z] + NOTES_COLUMNS > NOTES_TOTAL_COLUMNS then return false end
+  if mus.track_sizes[z] == 0 then mus.track_sizes[z] = mus.track_sizes[z] + NOTES_COLUMNS end
+  mus.track_sizes[z] = mus.track_sizes[z] + NOTES_COLUMNS
+  for y=0,<NOTES_ROWS do -- shift notes
+    for ix=NOTES_TOTAL_COLUMNS-NOTES_COLUMNS-1,>=align_page(x+NOTES_COLUMNS),-1 do
+      mus.pages[z][y][ix+NOTES_COLUMNS] = mus.pages[z][y][ix]
+      mus.pages[z][y][ix] = {}
+    end
+  end
+  return true
+end
+
+local function del_page()
+  local was_clear = true
+  for y=0,<NOTES_ROWS do
+    for x=align_page(focus_x),<align_page_forward(focus_x) do
+      if mus.pages[focus_z][y][x].periods ~= 0 then
+        mus.pages[focus_z][y][x] = {}
+        was_clear = false
+      end
+    end
+  end
+  if was_clear and remove_page(focus_z, focus_x) then
+    focus_note(0, 0, 0)
+  end
+end
+
+local function add_page()
+  if append_page(focus_z, focus_x) then
+    focus_note(NOTES_COLUMNS, 0, 0)
+  end
+end
+
+local function copy_page(x: int64)
+  local page_x = align_page(x)
+  for y=0,<NOTES_ROWS do
+    for x=0,<NOTES_COLUMNS do
+      page_clipboard[y][x] = mus.pages[focus_z][y][page_x+x]
+    end
+  end
+end
+
+local function paste_page(x: int64)
+  local page_x = align_page(x)
+  for y=0,<NOTES_ROWS do
+    for x=0,<NOTES_COLUMNS do
+      mus.pages[focus_z][y][page_x+x] = page_clipboard[y][x]
+    end
+  end
+end
+
+local function change_note_period(dx: int64)
+  local periods = mus.pages[focus_z][focus_y][focus_x].periods
+  if dx > 0 then -- remove next note
+    local overwrite_x = focus_x + periods
+    if overwrite_x < NOTES_TOTAL_COLUMNS then
+      mus.pages[focus_z][focus_y][overwrite_x] = {}
+    end
+  end
+  local periods = math.clamp(focus_x + periods + dx, focus_x, align_page_forward(focus_x)) - focus_x
+  if periods == 0 then -- clear note
+    mus.pages[focus_z][focus_y][focus_x] = {}
+  else
+    decrement_overlap_note(focus_x, focus_y, focus_z)
+    mus.pages[focus_z][focus_y][focus_x].periods = periods
+  end
+end
+
+local function change_note_volume(dy: int64)
+  if mus.pages[focus_z][focus_y][focus_x].periods == 0 then return end
+  mus.pages[focus_z][focus_y][focus_x].volume = math.clamp(mus.pages[focus_z][focus_y][focus_x].volume + dy, -5, 5)
+end
+
+local function change_note_slide(dy: int64)
+  if mus.pages[focus_z][focus_y][focus_x].periods == 0 then return end
+  mus.pages[focus_z][focus_y][focus_x].slide = math.clamp(mus.pages[focus_z][focus_y][focus_x].slide + dy, -5, 5)
+end
+
+local function shift_notes(dx: int64, dy: int64)
+  local temp_page: [NOTES_ROWS][NOTES_COLUMNS]Note
+  local focus_page_x = align_page(focus_x)
+  for y=0,<NOTES_ROWS do
+    for x=0,<NOTES_COLUMNS do
+      temp_page[y][x] = mus.pages[focus_z][y][focus_page_x+x]
+    end
+  end
+  for y=0,<NOTES_ROWS do
+    for x=0,<NOTES_COLUMNS do
+      local ny = (y+dy) % NOTES_ROWS
+      local nx = focus_page_x + (x+dx) % NOTES_COLUMNS
+      mus.pages[focus_z][ny][nx] = temp_page[y][x]
+      mus.pages[focus_z][ny][nx].periods = math.min(mus.pages[focus_z][ny][nx].periods, NOTES_COLUMNS - (nx % NOTES_COLUMNS))
+    end
+  end
+end
+
+local function toggle_track_mute(z: int64)
+  muted_tracks[z] = not muted_tracks[z]
+  if muted_tracks[z] and track_solo_z == z then
+    track_solo_z = -1
+  end
+end
+
+local function toggle_track_solo(z: int64)
+  if track_solo_z == z then
+    track_solo_z = -1
+  else
+    track_solo_z = z
+    muted_tracks[z] = false
+  end
+end
+
+local function set_loop_start(x: int64)
+  if note_frame_start == x then
+    note_frame_start = 0
+  else
+    note_frame_start = x
+    if note_frame_end ~= 0 then
+      note_frame_end = math.max(note_frame_end, x + NOTES_COLUMNS)
+    end
+  end
+end
+
+local function set_loop_end(x: int64)
+  if note_frame_end == x then
+    note_frame_end = 0
+  else
+    note_frame_end = x
+    if note_frame_start ~= 0 then
+      note_frame_start = math.min(note_frame_start, x - NOTES_COLUMNS)
+    end
+  end
+end
+
+local function is_track_muted(z: int64)
+  return (track_solo_z ~= -1 and track_solo_z ~= z) or muted_tracks[z]
+end
+
+local function has_playable_note_at_xy(note_frame: int64, y: int64): boolean
+  for other_z=0,<NOTES_TRACKS do
+    if mus.pages[other_z][y][note_frame % math.max(mus.track_sizes[other_z], NOTES_COLUMNS)].periods > 0 and
+       not muted_tracks[other_z] and
+       (track_solo_z == -1 or (track_solo_z == other_z)) then
+      return true
+    end
+  end
+  return false
+end
+
+local function draw_boxed_text(text: cstring, align: riv_align, x: int64, y: int64, col: int64)
+  local bbox = riv_draw_text_ex(text, RIV_SPRITESHEET_FONT_5X7, align, x-1, y-1, 1, 1, 1, 3, -1)
+  riv_draw_rect_fill(bbox.x-2, bbox.y-2, bbox.width+4, bbox.height+4, RIV_COLOR_DARKSLATE)
+  riv_draw_text_ex(text, RIV_SPRITESHEET_FONT_5X7, align, x-1, y-1, 1, 1, 1, 3, col)
+end
+
+riv.tracked_keys[RIV_KEYCODE_H] = true
+
+repeat -- main loop
+  local hits_per_second = mus.bpm*TIME_SIG/60
+  local frames_per_hits = math.ifloor((60*riv.target_fps)/(mus.bpm*TIME_SIG))
+  note_time = note_time + hits_per_second/riv.target_fps
+  local frame = riv.frame
+  local note_base_frame = math.ifloor(note_time)
+  local note_frame = note_base_frame
+  if note_frame_end > 0 then
+    note_frame = note_base_frame % (note_frame_end - note_frame_start) + note_frame_start
+  end
+
+  local edit_state: EditState = EditState.NOTE_FOCUS
+  local show_help: boolean = riv.keys[RIV_KEYCODE_H].down or riv.keys[RIV_GAMEPAD_SELECT].down
+  do -- handle inputs
+    if riv.keys[RIV_GAMEPAD_L2].down then edit_state = EditState.PAGE_FOCUS
+    elseif riv.keys[RIV_GAMEPAD_R2].down then edit_state = EditState.TRACK_FOCUS
+    elseif riv.keys[RIV_GAMEPAD_A1].down then edit_state = EditState.NOTE_TOGGLE
+    elseif riv.keys[RIV_GAMEPAD_A2].down then edit_state = EditState.NOTE_SHIFT
+    elseif riv.keys[RIV_GAMEPAD_A3].down then edit_state = EditState.NOTE_SLIDE
+    elseif riv.keys[RIV_GAMEPAD_A4].down then edit_state = EditState.NOTE_VOLUME end
+
+    -- check inputs
+    if edit_state == EditState.NOTE_TOGGLE then -- A1
+      if riv.keys[RIV_GAMEPAD_A1].press then
+        toggle_note(-1)
+      elseif last_toggle_x ~= focus_x or last_toggle_y ~= focus_y then
+        toggle_note(last_toggle_action)
+      end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_RIGHT) then focus_note(1, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_LEFT) then focus_note(-1, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then focus_note(0, 1, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then focus_note(0, -1, 0) end
+    elseif edit_state == EditState.NOTE_SHIFT then -- A2
+      if riv_is_key_repeat_press(RIV_GAMEPAD_RIGHT) then shift_notes(1, 0) focus_note(1, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_LEFT) then shift_notes(-1, 0) focus_note(-1, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then shift_notes(0, -1) focus_note(0, -1, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then shift_notes(0, 1) focus_note(0, 1, 0) end
+    elseif edit_state == EditState.NOTE_SLIDE then -- A3
+      if riv.keys[RIV_GAMEPAD_A3].press then
+        place_note()
+      end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_RIGHT) then change_note_period(1) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_LEFT) then change_note_period(-1) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then change_note_slide(-1) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then change_note_slide(1) end
+    elseif edit_state == EditState.NOTE_VOLUME then -- A4
+      if riv.keys[RIV_GAMEPAD_A4].press then
+        place_note()
+      end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then change_note_volume(1) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then change_note_volume(-1) end
+    elseif edit_state == EditState.PAGE_FOCUS then -- L1
+      if riv_is_key_repeat_press(RIV_GAMEPAD_RIGHT) then focus_note(NOTES_COLUMNS, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_LEFT) then focus_note(-NOTES_COLUMNS, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then focus_note(0, 0, 1) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then focus_note(0, 0, -1) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_R1) then del_page() end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_R2) then add_page() end
+      if riv.keys[RIV_GAMEPAD_A3].press then copy_page(focus_x) end
+      if riv.keys[RIV_GAMEPAD_A4].press then paste_page(focus_x) end
+    elseif edit_state == EditState.TRACK_FOCUS then -- R2
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then mus.bpm = math.clamp(mus.bpm + 1, 0, 900) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then mus.bpm = math.clamp(mus.bpm - 1, 0, 900) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_LEFT) then set_loop_start(align_page(focus_x)) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_RIGHT) then set_loop_end(align_page_forward(focus_x)) end
+      if riv.keys[RIV_GAMEPAD_A1].press then toggle_track_mute(focus_z) end
+      if riv.keys[RIV_GAMEPAD_A2].press then toggle_track_solo(focus_z) end
+    else -- free
+      if riv_is_key_repeat_press(RIV_GAMEPAD_RIGHT) then focus_note(1, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_LEFT) then focus_note(-1, 0, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_DOWN) then focus_note(0, 1, 0) end
+      if riv_is_key_repeat_press(RIV_GAMEPAD_UP) then focus_note(0, -1, 0) end
+    end
+  end
+
+  -- drumming disabled because of audio sync delay
+  for i=0,<10 do
+    local key = RIV_KEYCODE_0 + (i+1) % 10
+    riv.tracked_keys[key] = true
+    if riv_is_key_repeat_press(key, frames_per_hits, frames_per_hits) then
+      local synth_note: SynthNote = {
+        waves = synths[focus_z][i],
+        start_freq = note_scale[5+i],
+        end_freq = note_scale[5+i],
+        amplitude = 2^(0/4),
+        periods = 1,
+        bps = hits_per_second,
+      }
+      synth_note:play()
+    end
+  end
+
+  -- play notes
+  if note_base_frame ~= last_note_frame then
+    last_note_frame = note_base_frame
+    for note_z=0,<NOTES_TRACKS do
+      local note_x = note_frame % math.max(mus.track_sizes[note_z], NOTES_COLUMNS)
+      if is_track_muted(note_z) then continue end
+      for note_y=0,<NOTES_ROWS do
+        local note = mus.pages[note_z][note_y][note_x]
+        if note.periods == 0 then continue end
+        local synth_note: SynthNote = {
+          waves = synths[note_z][note_y],
+          start_freq = note_scale[note_y + 5],
+          end_freq = note_scale[note_y + 5],
+          amplitude = 2^(note.volume/3),
+          periods = note.periods,
+          bps = hits_per_second,
+        }
+        if note.slide ~= 0 then
+          synth_note.start_freq = note_scale[math.clamp(note_y + 5 + note.slide, 0, #note_scale)]
+        end
+        synth_note:play()
+      end
+    end
+  end
+
+  -- clear screen
+  riv_clear(RIV_COLOR_BLACK)
+
+  do -- draw piano roll
+    local margin_left = 3
+    local margin_top = 14
+    local spacing_x = 5
+    local spacing_y = 4
+    local box_width = 11
+    local box_height = 13
+    local note_z = focus_z
+    local note_frame_x = note_frame % math.max(mus.track_sizes[note_z], NOTES_COLUMNS)
+    local focus_page_x = align_page(focus_x)
+    for note_y=0,<NOTES_ROWS do
+      local next_note_x = 0
+      for note_x=align_page(focus_x),<align_page_forward(focus_x) do
+        local focused = note_x == focus_x and note_y == focus_y
+        local editing = focused and (edit_state == EditState.NOTE_SLIDE or edit_state == EditState.NOTE_VOLUME)
+        local toggling = focused and (edit_state == EditState.NOTE_TOGGLE)
+        if focused or note_x >= next_note_x then
+          local periods = mus.pages[note_z][note_y][note_x].periods
+          local slide = mus.pages[note_z][note_y][note_x].slide
+          local volume = mus.pages[note_z][note_y][note_x].volume
+          local toggled = periods > 0
+          local hovered = note_frame_x == note_x or ((note_frame_x >= note_x) and (note_frame_x < note_x + periods))
+          local playing = toggled and hovered and not is_track_muted(note_z)
+          local back_playing = (note_frame_x % NOTES_COLUMNS) == (note_x % NOTES_COLUMNS) and has_playable_note_at_xy(note_frame, note_y)
+          local fill_col = (note_y >= 5) and RIV_COLOR_BLACK or RIV_COLOR_DARKSLATE
+          local volo_col = fill_col
+          local line_col = (note_x % 4) == 0 and RIV_COLOR_LIGHTSLATE or RIV_COLOR_SLATE
+          local x = margin_left + (note_x - focus_page_x) * (box_width + spacing_x)
+          local y = margin_top + note_y * (box_height + spacing_y)
+          local height = box_height
+          local width = box_width + math.max(periods - 1, 0) * (box_width + spacing_x)
+          if back_playing then
+            fill_col = RIV_COLOR_SLATE
+            volo_col = RIV_COLOR_SLATE
+          end
+          if playing then
+            fill_col = RIV_COLOR_PINK
+            volo_col = RIV_COLOR_LIGHTPINK
+            line_col = RIV_COLOR_WHITE
+            played_frames[note_z][note_y][note_x] = frame
+          elseif toggled then
+            fill_col = RIV_COLOR_DARKPURPLE
+            volo_col = RIV_COLOR_PURPLE
+            line_col = RIV_COLOR_PINK
+          elseif hovered then
+            line_col = RIV_COLOR_PINK
+          end
+          if focused then
+            line_col = RIV_COLOR_YELLOW
+          end
+          if editing then
+            line_col = RIV_COLOR_LIGHTRED
+          elseif toggling then
+            line_col = RIV_COLOR_WHITE
+          end
+          if playing or played_frames[note_z][note_y][note_x] ~= 0 then
+            local elapsed = math.min(frame - played_frames[note_z][note_y][note_x], 20) / 20
+            if elapsed == 0 then
+              x = x + math.ifloor(math.sin(frame)*1)
+            end
+            if elapsed < 1 then
+              y = y - math.iround(4*sinc_impulse(elapsed*2 + 0.1, 2))
+            end
+          end
+          riv_draw_rect_fill(x+1, y+1, width-2, height-2, fill_col)
+          if toggled then
+            riv_draw_rect_fill(x+1, y+1 + (5 - volume), width-2, (6 + volume), volo_col)
+          end
+          riv_draw_rect_line(x, y, width, height, line_col)
+          if slide > 0 then
+            local xr, yb = x + width-3, y + height-3
+            local xl, yt = xr - 5, yb - 5
+            riv_draw_triangle_fill(xr,  yb, xl, yb, xr,  yt, RIV_COLOR_PINK)
+            riv_draw_line(xr,  yt + slide, xr,  yt, RIV_COLOR_LIGHTPINK)
+          elseif slide < 0 then
+            local xr, yb = x + 2 + 5, y + height-3
+            local xl, yt = xr - 5, yb - 5
+            riv_draw_triangle_fill(xl,  yb, xr, yb, xl,  yt, RIV_COLOR_PINK)
+            riv_draw_line(xl,  yb + slide, xl,  yb, RIV_COLOR_LIGHTPINK)
+          end
+          if show_help and note_x % NOTES_COLUMNS == 0 then
+            local note_name = NOTES_NAMES[(note_scale_index + pentatic_scale_offsets[note_y % 5]) % 12]
+            riv_draw_text(note_name, RIV_SPRITESHEET_FONT_3X5, RIV_CENTER, x+width//2, y+height//2, 1, RIV_COLOR_WHITE)
+          end
+          next_note_x = math.max(next_note_x, note_x + periods)
+        end
+      end
+    end
+    riv_draw_text(riv_tprintf("%s", synth_names[focus_z]), RIV_SPRITESHEET_FONT_5X7, RIV_TOPLEFT, margin_left, 4, 1, edit_state == EditState.PAGE_FOCUS and RIV_COLOR_WHITE or RIV_COLOR_LIGHTGREY)
+    draw_boxed_text(riv_tprintf("BPM %d", mus.bpm), RIV_TOPRIGHT, 256-4, 5, edit_state == EditState.TRACK_FOCUS and RIV_COLOR_LIGHTRED or RIV_COLOR_WHITE)
+  end
+
+  do -- draw playlist
+    local focus_page_x = align_page(focus_x)
+    for note_z=0,<NOTES_TRACKS do
+      local note_frame_x = note_frame % math.max(mus.track_sizes[note_z], NOTES_COLUMNS)
+      local note_frame_page_x = align_page(note_frame_x)
+      for page_x=0,<math.max(mus.track_sizes[note_z], NOTES_COLUMNS),NOTES_COLUMNS do
+        local focused = focus_z == note_z and focus_page_x == page_x
+        local playing = note_frame_page_x == page_x
+        local fill_col = RIV_COLOR_DARKSLATE
+        local line_col = RIV_COLOR_SLATE
+        if focused and edit_state == EditState.PAGE_FOCUS then
+          if note_z == track_solo_z then
+            line_col = RIV_COLOR_LIGHTGREEN
+          elseif muted_tracks[note_z] then
+            line_col = RIV_COLOR_LIGHTRED
+          else
+            line_col = RIV_COLOR_WHITE
+          end
+        elseif focused then
+          if note_z == track_solo_z then
+            line_col = RIV_COLOR_GREEN
+          elseif muted_tracks[note_z] then
+            line_col = RIV_COLOR_RED
+          else
+            line_col = RIV_COLOR_LIGHTSLATE
+          end
+        else
+          if note_z == track_solo_z then
+            line_col = RIV_COLOR_DARKGREEN
+          elseif muted_tracks[note_z] then
+            line_col = RIV_COLOR_DARKRED
+          else
+            line_col = RIV_COLOR_SLATE
+          end
+        end
+        if focused then
+          fill_col = RIV_COLOR_SLATE
+        end
+        local margin_left = 4
+        local margin_top = 184
+        local spacing_y = 3
+        local box_width = 16 + 15 + 2
+        local box_height = 10 + 2
+        local x = margin_left + (page_x // NOTES_COLUMNS)*(box_width+3)
+        local y = margin_top + note_z * (box_height + spacing_y)
+        riv_draw_rect_fill(x, y, box_width, box_height, fill_col)
+        riv_draw_rect_line(x-1, y-1, box_width+2, box_height+2, line_col)
+        if playing then
+          riv_draw_rect_fill(x+1+math.ifloor(note_time/NOTES_COLUMNS % 1 * (box_width-1)), y, 1, box_height, line_col)
+        end
+        if note_frame_start == page_x and note_frame_start > 0 then
+          riv_draw_rect_line(x-1, y-1, 1, box_height+2, RIV_COLOR_LIGHTTEAL)
+        end
+        if note_frame_end - NOTES_COLUMNS == page_x and note_frame_end ~= 0 then
+          riv_draw_rect_line(x+box_width, y-1, 1, box_height+2, RIV_COLOR_LIGHTBLUE)
+        end
+        for note_y=0,<NOTES_ROWS do
+          for note_x=page_x,<page_x+NOTES_COLUMNS do
+            local periods = mus.pages[note_z][note_y][note_x].periods
+            if periods > 0 then
+              local active = note_frame_x == note_x or ((note_frame_x >= note_x) and (note_frame_x < note_x + periods)) and not is_track_muted(note_z)
+              local note_col = active and RIV_COLOR_WHITE or RIV_COLOR_PINK
+              riv_draw_rect_fill(x + 1 + (note_x - page_x)*2, y + 1 + note_y, periods*2-1, 1, note_col)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  do -- draw status bar
+    local help = ''
+    switch edit_state do
+    case EditState.NOTE_TOGGLE then help = last_toggle_action == 1 and 'Adding notes' or 'Removing notes'
+    case EditState.NOTE_VOLUME then help = 'Editing note volume'
+    case EditState.NOTE_SLIDE  then help = 'Sliding note'
+    case EditState.NOTE_SHIFT  then help = 'Shifting notes'
+    case EditState.PAGE_FOCUS  then help = 'Navigating pages'
+    case EditState.TRACK_FOCUS then help = 'Editing tracks'
+    else                            help = 'Navigating notes'
+    end
+    riv_draw_rect_fill(0, 256-11, 256, 11, RIV_COLOR_DARKSLATE)
+    riv_draw_text(help, RIV_SPRITESHEET_FONT_5X7, RIV_BOTTOMLEFT, 4, 256-3, 1, RIV_COLOR_WHITE)
+    riv_draw_text("SELECT/H for help", RIV_SPRITESHEET_FONT_5X7, RIV_BOTTOMRIGHT, 256-4, 256-3, 1, RIV_COLOR_LIGHTGREY)
+  end
+
+  -- draw help
+  if show_help then
+    local help = [[
+Navigate notes
+Toggle note
+Toggle notes
+Shift page notes
+Edit note size
+Edit note slide
+Edit note volume
+Navigate pages
+Delete page
+Add page
+Copy page
+Paste page
+Set loop marks
+Change speed
+Toggle track solo
+Toggle track mute]]
+    local keys = riv.keys[RIV_KEYCODE_H].down and
+        "\x01\x02\x03\x04\n"..
+        "Z\n"..
+        "Z + \x01\x02\x03\x04\n"..
+        "X + \x01\x02\x03\x04\n"..
+        "C + \x01\x02\n"..
+        "C + \x03\x04\n"..
+        "V + \x03\x04\n"..
+        "A + \x01\x02\x03\x04\n"..
+        "A + S\n"..
+        "A + F\n"..
+        "A + C\n"..
+        "A + V\n"..
+        "F + \x01\x02\n"..
+        "F + \x03\x04\n"..
+        "F + Z\n"..
+        "F + X"
+      or
+        "\x01\x02\x03\x04\n"..
+        "A1\n"..
+        "A1 + \x01\x02\x03\x04\n"..
+        "A2 + \x01\x02\x03\x04\n"..
+        "A3 + \x01\x02\n"..
+        "A3 + \x03\x04\n"..
+        "A4 + \x03\x04\n"..
+        "L2 + \x01\x02\x03\x04\n"..
+        "L2 + R1\n"..
+        "L2 + R2\n"..
+        "L2 + A3\n"..
+        "L2 + A4\n"..
+        "R2 + \x01\x02\n"..
+        "R2 + \x03\x04\n"..
+        "R2 + A1\n"..
+        "R2 + A2"
+    riv_draw_rect_fill((256-192)//2, (256-152)//2, 192, 152, RIV_COLOR_BLACK)
+    riv_draw_rect_line((256-192)//2, (256-152)//2, 192, 152, RIV_COLOR_LIGHTGREY)
+    riv_draw_text_ex(help, RIV_SPRITESHEET_FONT_5X7, RIV_CENTER, 128+32, 128, 1, 1, 1, 2, RIV_COLOR_WHITE)
+    riv_draw_text_ex(keys, RIV_SPRITESHEET_FONT_5X7, RIV_LEFT, 38, 128, 1, 1, 1, 2, RIV_COLOR_YELLOW)
+  end
+until not riv_present()
