@@ -27,9 +27,9 @@ Here is a list of 10 sound loops created with this tool as examples, click on th
 ## Notes
 
 Have in mind this is a sequencer toy, with emphasis on *toy*,
-there it's in the goal to create a DAW (Digital Audio Workstation).
+it's NOT a goal to create a DAW (Digital Audio Workstation).
 However this tools is enough to create simple and interesting sound loops
-to be used with games.
+to be used in simple games.
 
 As a toy, it has some intentional constraints to not make its users
 overwhelmed by so many options professional music sequencers have,
