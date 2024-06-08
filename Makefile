@@ -56,7 +56,8 @@ $(NAME).elf: $(NAME).nelua *.nelua libriv
 		--output=$@ $<
 
 $(NAME).png: $(NAME).sqfs
-	$(RIVEMU) -save-screenshot=$(NAME).png -stop-frame=0 $(NAME).sqfs
+	$(RIVEMU) -save-screenshot=$(NAME).png -load-incard=songs/03.seqt.rivcard -stop-frame=60 $(NAME).sqfs
+	magick $(NAME).png -scale 200% $(NAME).png
 	oxipng $(NAME).png
 
 libriv:

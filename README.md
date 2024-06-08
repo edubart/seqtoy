@@ -9,6 +9,21 @@ You can try it in your browser
 
 ![Screenshot](https://raw.githubusercontent.com/edubart/seqtoy/master/seqtoy.png)
 
+## Sound loop examples
+
+Here is a list of 10 sound loops created with this tool as examples, click on them to play in your browser, you can also mix them right-away.
+
+- [01.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/01.seqt.rivcard)
+- [02.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/02.seqt.rivcard)
+- [03.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/03.seqt.rivcard)
+- [04.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/04.seqt.rivcard)
+- [05.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/05.seqt.rivcard)
+- [06.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/06.seqt.rivcard)
+- [07.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/07.seqt.rivcard)
+- [08.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/08.seqt.rivcard)
+- [09.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/09.seqt.rivcard)
+- [10.seqt.rivcard](https://emulator.rives.io/#cartridge=https://raw.githubusercontent.com/edubart/cartridges/main/seqtoy.sqfs&incard=https://raw.githubusercontent.com/edubart/cartridges/main/cards/10.seqt.rivcard)
+
 ## Notes
 
 Have in mind this is a sequencer toy, with emphasis on *toy*,
