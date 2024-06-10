@@ -711,7 +711,7 @@ Toggle track mute]]
         "C + \x03\x04\n"..
         "V + \x03\x04\n"..
         "A + \x01\x02\x03\x04\n"..
-        "A + S\n"..
+        "A + D\n"..
         "A + F\n"..
         "A + C\n"..
         "A + V\n"..
