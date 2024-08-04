@@ -140,11 +140,12 @@ mus.bpm = 90
 
 if riv.incard_len > 0 then
   local incard_mus = (@*Music)(&riv.incard[0])
-  assert(riv.incard_len == #@Music and
+  if not (riv.incard_len == #@Music and
           incard_mus.magic == mus.magic and
           incard_mus.version == 0 and incard_mus.flags == 0 and
-          incard_mus.bpm >= 1 and incard_mus.bpm <= 900,
-    'invalid sequencer music file for incard')
+          incard_mus.bpm >= 1 and incard_mus.bpm <= 900) then
+    riv_panic('invalid sequencer music file for incard')
+  end
   $mus = $incard_mus
 end
 

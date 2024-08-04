@@ -54,6 +54,7 @@ $(NAME).elf: $(NAME).nelua *.nelua libriv
 		--cache-dir=. \
 		--cflags='$(CFLAGS)' \
 		--output=$@ $<
+	$(RIVEMU_EXEC) riv-strip $@
 
 $(NAME).png: $(NAME).sqfs
 	$(RIVEMU) -save-screenshot=$(NAME).png -load-incard=songs/03.seqt.rivcard -stop-frame=60 $(NAME).sqfs
