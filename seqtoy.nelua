@@ -80,15 +80,6 @@ local synth_names: [NOTES_TRACKS]string = {
 --------------------------------------------------------------------------------
 -- Utilities
 
-local function riv_is_key_repeat_press(key: uint8, first_delay: uint64, repeat_delay: uint64): boolean
-  if riv.keys[key].press then return true end
-  if not riv.keys[key].down then return false end
-  if first_delay == 0 then first_delay = math.max(riv.target_fps // 3, 1) end
-  if repeat_delay == 0 then repeat_delay = math.max(riv.target_fps // 15, 1) end
-  local down_frame: uint64 = riv.keys[key].down_frame
-  return riv.frame >= down_frame + first_delay and (riv.frame - down_frame) % repeat_delay == 0
-end
-
 local function get_major_pentatonic_scale(semitone_index: int64): [3*NOTES_ROWS]float32
   local freq = 110.0 * 2.0 ^ ((semitone_index - 45)/12.0)
   local scale: [3*NOTES_ROWS]float32
