@@ -57,3 +57,9 @@ every frame, check the RIV documentation for more details about waveforms.
 
 First make sure you have the RIV SDK installed in your environment, then just type `make` to compile.
 You can also play it by typing `make run`.
+
+## Using in RIV cartridges
+
+Using in other RIV cartridges is easy, you just need to copy [seqt.h](/seqt.h)
+to your project and use it.
+Check [seqt-example.c](/seqt-example.c) file for an example playing a music.

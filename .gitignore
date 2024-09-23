@@ -1,4 +1,8 @@
-*.c
+seqtoy.c
 *.sqfs
 *.elf
 libriv
+*.a
+*.so
+*.o
+riv.h

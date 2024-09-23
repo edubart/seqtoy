@@ -24,6 +24,8 @@ else
 	CFLAGS=$(shell $(RIVEMU_EXEC) riv-opt-flags -Ospeed)
 endif
 
+all: build libseqt
+
 build: $(NAME).sqfs
 
 run: $(NAME).sqfs
@@ -38,7 +40,7 @@ live-dev:
 	luamon -e nelua,Makefile -x 'make quick-run'
 
 clean:
-	rm -rf *.sqfs *.elf *.c
+	rm -rf seqtoy.c *.sqfs *.elf *.o *.a *.so
 
 distclean: clean
 	rm -rf libriv
@@ -68,3 +70,13 @@ libriv:
 	$(RIVEMU_EXEC) cp /usr/lib/nelua/lib/riv.nelua libriv/
 	$(RIVEMU_EXEC) cp /usr/lib/nelua/lib/riv_types.nelua libriv/
 	$(RIVEMU_EXEC) cp /lib/libc.musl-riscv64.so.1 libriv/
+
+seqt.o: seqt.h
+	$(RIVEMU_EXEC) gcc -c -o $@ -x c $< -fPIC -g0 -DSEQT_IMPL $(shell $(RIVEMU_EXEC) riv-opt-flags --cflags -Ospeed)
+libseqt.a: seqt.o
+	$(RIVEMU_EXEC) ar rcs $@ $^
+	$(RIVEMU_EXEC) riv-strip -S $@
+libseqt.so: seqt.o
+	$(RIVEMU_EXEC) gcc -shared -o $@ $^ $(shell $(RIVEMU_EXEC) riv-opt-flags --ldflags -Ospeed)
+	$(RIVEMU_EXEC) riv-strip -S -x $@
+libseqt: libseqt.a libseqt.so
