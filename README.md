@@ -63,3 +63,8 @@ You can also play it by typing `make run`.
 Using in other RIV cartridges is easy, you just need to copy [seqt.h](/seqt.h)
 to your project and use it.
 Check [seqt-example.c](/seqt-example.c) file for an example playing a music.
+
+You can try this example with:
+```sh
+rivemu -workspace -exec riv-jit-c seqt-example.c
+```

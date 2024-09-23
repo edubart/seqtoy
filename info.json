@@ -1,0 +1,13 @@
+{
+    "name": "Seqtoy",
+    "summary": "A toy sequencer that is very easy to create song loops",
+    "description": "Hold H for help.\nTry browsing tapes for examples of songs and also to learn how people create songs with this tool.\nAny song created with this tool is easy to use with other RIVES cartridges!",
+    "tags": ["sequencer", "tool", "music"],
+    "authors": [{
+        "name": "Eduardo Bart",
+        "link": "https://github.com/edubart"
+    }],
+    "links": [
+        "https://github.com/edubart/seqytoy"
+    ]
+}

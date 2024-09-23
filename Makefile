@@ -1,5 +1,5 @@
 NAME=seqtoy
-DATA_FILES=
+DATA_FILES=info.json
 COMP=xz
 RIVEMU=rivemu
 RIVEMU_RUN=$(RIVEMU)
