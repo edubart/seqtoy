@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "riv.h"
 
 #ifndef SEQT_API
@@ -65,10 +66,12 @@ typedef struct seqt_sound {
   seqt_soundfont *font;
   seqt_source *source;
   uint64_t frame;
+  uint64_t start_frame;
   uint64_t stop_frame;
   double speed;
   float pitch;
   float volume;
+  int32_t loops;
   uint64_t last_note_frame;
   bool paused;
 } seqt_sound;
@@ -83,12 +86,12 @@ typedef struct seqt_context {
 // SEQT API
 
 // Global SEQT context
-SEQT_API seqt_context seqt;
+extern seqt_context seqt;
 
 // Initialize SEQT context, must be called on initialization.
-SEQT_API void seqt_init();
+SEQT_API void seqt_init(void);
 // Poll all sounds, must be called once every frame.
-SEQT_API void seqt_poll();
+SEQT_API void seqt_poll(void);
 
 ////////////////////////////////////////
 // Sound sources
@@ -97,7 +100,7 @@ SEQT_API void seqt_poll();
 SEQT_API seqt_source *seqt_make_source_from_file(const char *filename);
 // Destroy a sound source
 SEQT_API void seqt_destroy_source(seqt_source *source);
-// Get sound source time length in seconds
+// Get sound source time length (in seconds)
 SEQT_API double seqt_get_source_length(seqt_source *source);
 
 ////////////////////////////////////////
@@ -105,8 +108,12 @@ SEQT_API double seqt_get_source_length(seqt_source *source);
 
 // Play a sound from a source for loop times and returns its it (negative loops plays forever)
 SEQT_API uint64_t seqt_play(seqt_source *source, int32_t loops);
-// Stop a sound after a delay (in seconds)
-SEQT_API void seqt_stop(uint64_t sound_id, double secs);
+// Stop a sound
+SEQT_API void seqt_stop(uint64_t sound_id);
+// Set sound start time (in seconds)
+SEQT_API void seqt_set_start(uint64_t sound_id, double secs);
+// Set sound stop time (in seconds)
+SEQT_API void seqt_set_stop(uint64_t sound_id, double secs);
 // Seek a sound to a timestamp (in seconds)
 SEQT_API void seqt_seek(uint64_t sound_id, double secs);
 // Set sound paused
@@ -117,6 +124,12 @@ SEQT_API void seqt_set_speed(uint64_t sound_id, float speed);
 SEQT_API void seqt_set_pitch(uint64_t sound_id, float pitch);
 // Set sound volume, values larger than 1 will play louder
 SEQT_API void seqt_set_volume(uint64_t sound_id, float volume);
+// Get sound elapsed time (in seconds)
+SEQT_API double seqt_get_time(uint64_t sound_id);
+// Get sound time length of one loop (in seconds)
+SEQT_API double seqt_get_loop_length(uint64_t sound_id);
+// Check if sound is still valid (not stopped yet)
+SEQT_API bool seqt_is_valid(uint64_t sound_id);
 
 ////////////////////////////////////////
 // Low level API (avoid using)
@@ -146,9 +159,9 @@ static inline uint64_t clampu(uint64_t a, uint64_t min, uint64_t max) { return m
 seqt_context seqt;
 
 void seqt_play_note(seqt_synthnote *note) {
-  for (uint64_t i=0;i<SEQT_SYNTH_WAVES;++i) {
+  for (uint64_t i = 0; i < SEQT_SYNTH_WAVES; ++i) {
     riv_waveform_desc wave = note->synth.waves[i];
-    if (wave.type <= 0.0f || note->periods <= 0.0f) {
+    if (wave.type <= 0 || note->periods <= 0) {
       continue;
     }
     if (wave.start_frequency <= 8.0f && note->start_freq > 0.0f) {
@@ -168,6 +181,14 @@ void seqt_play_note(seqt_synthnote *note) {
   }
 }
 
+static uint64_t seqt_get_source_track_size(seqt_source* source) {
+  uint64_t track_size = 0;
+  for (uint64_t i = 0; i < SEQT_NOTES_TRACKS; ++i) {
+    track_size = maxu(source->track_sizes[i], track_size);
+  }
+  return track_size;
+}
+
 static void seqt_poll_sound(seqt_sound *sound) {
   if (sound->paused) {
     return;
@@ -180,39 +201,40 @@ static void seqt_poll_sound(seqt_sound *sound) {
     return;
   }
   sound->frame = frame;
-  uint64_t note_frame = floor((frame * hits_per_second * sound->speed) / riv->target_fps);
+  if (frame < sound->start_frame) return;
+  uint64_t note_frame = (uint64_t)floor(((double)(frame - sound->start_frame) * hits_per_second * sound->speed) / riv->target_fps);
   // TODO: allow setting loop ranges
-  if (note_frame == sound->last_note_frame) {
+  if (note_frame == sound->last_note_frame) return;
+  if (sound->loops >= 0 && (note_frame / seqt_get_source_track_size(source)) >= (uint64_t)sound->loops) {
+    *sound = (seqt_sound){0};
     return;
   }
   sound->last_note_frame = note_frame;
   seqt_soundfont *font = sound->font;
-  for (uint64_t note_z=0;note_z<SEQT_NOTES_TRACKS;++note_z) {
+  for (uint64_t note_z = 0; note_z < SEQT_NOTES_TRACKS; ++note_z) {
     uint64_t note_x = note_frame % maxu(source->track_sizes[note_z], SEQT_NOTES_COLUMNS);
     // TODO: allow muting tracks
-    for (uint64_t note_y=0;note_y<SEQT_NOTES_ROWS;++note_y) {
+    for (uint64_t note_y = 0; note_y < SEQT_NOTES_ROWS; ++note_y) {
       seqt_note note = source->pages[note_z][note_y][note_x];
-      if (note.periods == 0) {
-        continue;
-      }
+      if (note.periods == 0) continue;
       seqt_synthnote synth_note = {
         .synth = font->synths[note_z][note_y],
         .start_freq = font->scale[note_y + 5],
         .end_freq = font->scale[note_y + 5],
         .amplitude = powf(2.0f, (note.volume/3.0f)) * sound->volume,
         .periods = note.periods,
-        .bps = hits_per_second * sound->pitch,
+        .bps = (float)hits_per_second * sound->pitch,
       };
       if (note.slide != 0) {
-        synth_note.start_freq = font->scale[clampu(note_y + 5 + note.slide, 0, SEQT_NOTES_SCALE_NOTES-1)];
+        synth_note.start_freq = font->scale[clampu((uint64_t)((int64_t)note_y + 5 + note.slide), 0, SEQT_NOTES_SCALE_NOTES-1)];
       }
       seqt_play_note(&synth_note);
     }
   }
 }
 
-void seqt_poll() {
-  for (uint64_t i=1;i<=SEQT_MAX_SOUNDS;++i) {
+void seqt_poll(void) {
+  for (uint64_t i = 1; i <= SEQT_MAX_SOUNDS; ++i) {
     seqt_sound *sound = &seqt.sounds[i];
     if (sound->id != 0) {
       seqt_poll_sound(sound);
@@ -242,20 +264,13 @@ seqt_source *seqt_make_source_from_file(const char *filename) {
 }
 
 void seqt_destroy_source(seqt_source *source) {
-  if (source) {
-    munmap(source, sizeof(seqt_source));
-  }
+  if (!source) return;
+  munmap(source, sizeof(seqt_source));
 }
 
 double seqt_get_source_length(seqt_source *source) {
-  if (!source) {
-    return 0;
-  }
-  uint64_t track_size = 0;
-  for (uint64_t i = 0; i < SEQT_NOTES_TRACKS; ++i) {
-    track_size = maxu(source->track_sizes[i], track_size);
-  }
-  return (track_size * 3600.0) / (source->bpm * SEQT_TIME_SIG);
+  if (!source) return 0;
+  return ((double)seqt_get_source_track_size(source) * 60.0) / (double)(source->bpm * SEQT_TIME_SIG);
 }
 
 uint64_t seqt_play(seqt_source *source, int32_t loops) {
@@ -263,7 +278,7 @@ uint64_t seqt_play(seqt_source *source, int32_t loops) {
     riv_printf("failed to play seqt sound: invalid seqt source\n");
     return 0;
   }
-  for (uint64_t i=1;i<=SEQT_MAX_SOUNDS;++i) {
+  for (uint64_t i=1; i <= SEQT_MAX_SOUNDS; ++i) {
     seqt_sound *sound = &seqt.sounds[i];
     if (sound->id == 0) {
       uint64_t id = (seqt.sound_gen_counter++ << 32) | i;
@@ -272,10 +287,12 @@ uint64_t seqt_play(seqt_source *source, int32_t loops) {
         .font = &seqt.default_font,
         .source = source,
         .frame = 0,
-        .stop_frame = loops < 0 ? (uint64_t)-1 : loops*seqt_get_source_length(source),
+        .start_frame = 0,
+        .stop_frame = (uint64_t)-1,
         .speed = 1.0,
         .pitch = 1.0f,
         .volume = 1.0f,
+        .loops = loops,
         .last_note_frame = (uint64_t)-1,
         .paused = false,
       };
@@ -286,48 +303,86 @@ uint64_t seqt_play(seqt_source *source, int32_t loops) {
   return 0;
 }
 
-void seqt_stop(uint64_t sound_id, double secs) {
-  seqt_sound *sound = seqt_get_sound(sound_id);
-  sound->stop_frame = sound->frame + (uint64_t)(fmax(secs, 0.0) * riv->target_fps);
+void seqt_stop(uint64_t sound_id) {
+  seqt_set_stop(sound_id, 0);
 }
 
-void seqt_seek(uint64_t sound_id, double secs) {
-  seqt_get_sound(sound_id)->frame = fmax(secs, 0.0) * riv->target_fps;
+void seqt_set_start(uint64_t sound_id, double time) {
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->start_frame = (uint64_t)(fmax(time, 0.0) * riv->target_fps);
+}
+
+void seqt_set_stop(uint64_t sound_id, double time) {
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->stop_frame = (uint64_t)(fmax(time, 0.0) * riv->target_fps);
+}
+
+void seqt_seek(uint64_t sound_id, double time) {
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->frame = (uint64_t)(fmax(time, 0.0) * riv->target_fps);
 }
 
 void seqt_set_paused(uint64_t sound_id, bool paused) {
-  seqt_get_sound(sound_id)->paused = paused;
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->paused = paused;
 }
 
 void seqt_set_speed(uint64_t sound_id, float speed) {
-  seqt_get_sound(sound_id)->speed = speed;
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->speed = (double)speed;
 }
 
 void seqt_set_pitch(uint64_t sound_id, float pitch) {
-  seqt_get_sound(sound_id)->pitch = pitch;
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->pitch = pitch;
 }
 
 void seqt_set_volume(uint64_t sound_id, float volume) {
-  seqt_get_sound(sound_id)->volume = volume;
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return;
+  sound->volume = volume;
+}
+
+double seqt_get_time(uint64_t sound_id) {
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return 0;
+  return (double)sound->frame / riv->target_fps;
+}
+
+double seqt_get_loop_length(uint64_t sound_id) {
+  seqt_sound *sound = seqt_get_sound(sound_id);
+  if (!sound) return 0;
+  return seqt_get_source_length(sound->source) * sound->speed;
+}
+
+bool seqt_is_valid(uint64_t sound_id) {
+  return seqt_get_sound(sound_id) != NULL;
 }
 
 seqt_sound *seqt_get_sound(uint64_t sound_id) {
+  if (sound_id == 0) return NULL;
   seqt_sound *sound = &seqt.sounds[sound_id & (SEQT_MAX_SOUNDS-1)];
   return (sound->id == sound_id) ? sound : NULL;
 }
 
 static void seqt_fill_major_pentatonic_scale(float scale[SEQT_NOTES_SCALE_NOTES], int semitone_index) {
   double freq = 110.0 * pow(2.0, ((semitone_index - 45)/12.0));
-  for (int i=0; i < 4; ++i) {
-    scale[i*5+0] = floor(freq * pow(2.0, ((3-i) + 9.0/12.0)));
-    scale[i*5+1] = floor(freq * pow(2.0, ((3-i) + 7.0/12.0)));
-    scale[i*5+2] = floor(freq * pow(2.0, ((3-i) + 4.0/12.0)));
-    scale[i*5+3] = floor(freq * pow(2.0, ((3-i) + 2.0/12.0)));
-    scale[i*5+4] = floor(freq * pow(2.0, ((3-i) + 0.0/12.0)));
+  for (int i = 0; i < 4; ++i) {
+    scale[i*5+0] = (float)floor(freq * pow(2.0, ((3-i) + 9.0/12.0)));
+    scale[i*5+1] = (float)floor(freq * pow(2.0, ((3-i) + 7.0/12.0)));
+    scale[i*5+2] = (float)floor(freq * pow(2.0, ((3-i) + 4.0/12.0)));
+    scale[i*5+3] = (float)floor(freq * pow(2.0, ((3-i) + 2.0/12.0)));
+    scale[i*5+4] = (float)floor(freq * pow(2.0, ((3-i) + 0.0/12.0)));
   }
 }
 
-void seqt_init() {
+void seqt_init(void) {
   // Instruments
   seqt_synth STRINGS_WAVE = {.waves = {{
     .type = RIV_WAVEFORM_TRIANGLE,
